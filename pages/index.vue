@@ -3,6 +3,7 @@
     <h1>Workshop Registration System</h1>
     <WorkshopRegistrationForm />
   </div>
+  
 </template>
 
 <script setup>
