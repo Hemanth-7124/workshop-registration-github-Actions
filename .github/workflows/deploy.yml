@@ -1,185 +1,97 @@
-name: 🚀 Deploy Workshop Registration System
+name: Deploy Workshop App to EC2
 
 on:
   push:
     branches:
-      - main  # Trigger deployment when code is pushed to main
+      - main  # Deploy only on main branch
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # ------------------------------
-      # 1️⃣ Checkout latest code
-      # ------------------------------
-      - name: 🧾 Checkout code
+      # ---------------------------------------
+      # 1️⃣ Checkout Code
+      # ---------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ------------------------------
-      # 2️⃣ Validate required secrets
-      # ------------------------------
-      - name: 🔐 Verify Secrets
-        run: |
-          echo "🔍 Checking required secrets..."
-          missing=false
-          
-          check_secret() {
-            if [ -z "$1" ]; then
-              echo "❌ Missing secret: $2"
-              missing=true
-            fi
-          }
-
-          check_secret "${{ secrets.EC2_HOST }}" "EC2_HOST"
-          check_secret "${{ secrets.EC2_USER }}" "EC2_USER"
-          check_secret "${{ secrets.EC2_SSH_KEY }}" "EC2_SSH_KEY"
-          check_secret "${{ secrets.DB_HOST }}" "DB_HOST"
-          check_secret "${{ secrets.DB_USER }}" "DB_USER"
-          check_secret "${{ secrets.DB_PASSWORD }}" "DB_PASSWORD"
-          check_secret "${{ secrets.DB_NAME }}" "DB_NAME"
-          check_secret "${{ secrets.SMTP_HOST }}" "SMTP_HOST"
-          check_secret "${{ secrets.SMTP_PORT }}" "SMTP_PORT"
-          check_secret "${{ secrets.SMTP_USER }}" "SMTP_USER"
-          check_secret "${{ secrets.SMTP_PASS }}" "SMTP_PASS"
-          check_secret "${{ secrets.FROM_EMAIL }}" "FROM_EMAIL"
-          check_secret "${{ secrets.FROM_NAME }}" "FROM_NAME"
-
-          if [ "$missing" = true ]; then
-            exit 1
-          fi
-          
-          echo "✅ All secrets are available."
-
-      # ------------------------------
-      # 3️⃣ Configure SSH access
-      # ------------------------------
-      - name: ⚙️ Setup SSH
+      # ---------------------------------------
+      # 2️⃣ Setup SSH for EC2 Access
+      # ---------------------------------------
+      - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # ------------------------------
-      # 4️⃣ Deploy to EC2
-      # ------------------------------
-      - name: 🚀 Deploy on EC2
+      # ---------------------------------------
+      # 3️⃣ Deploy to EC2
+      # ---------------------------------------
+      - name: 🚀 Deploy to EC2
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
 
-            echo "📁 Navigating to app directory..."
             APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions"
-            cd "$APP_DIR" || exit 1
+            cd "$APP_DIR"
 
             echo "📦 Pulling latest code..."
             git fetch origin main
             git reset --hard origin/main
 
-            echo "🧩 Updating environment variables..."
-            cat > .env <<EOL
-            NODE_ENV=production
-            PORT=5000
-
-            # Database
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_NAME=${{ secrets.DB_NAME }}
-
-            # Email
-            SMTP_HOST=${{ secrets.SMTP_HOST }}
-            SMTP_PORT=${{ secrets.SMTP_PORT }}
-            SMTP_USER=${{ secrets.SMTP_USER }}
-            SMTP_PASS=${{ secrets.SMTP_PASS }}
-            FROM_EMAIL=${{ secrets.FROM_EMAIL }}
-            FROM_NAME=${{ secrets.FROM_NAME }}
-
-            # CORS
-            CORS_ORIGIN=http://${{ secrets.EC2_HOST }}
-            EOL
+            echo "🧾 Checking for .env file..."
+            if [ ! -f .env ]; then
+              echo "❌ Missing .env file in EC2 directory!"
+              exit 1
+            fi
 
             echo "🏗️ Building frontend..."
             npm ci
             npm run build
 
-            if [ -d ".output/public" ]; then
-              FRONTEND_DIR=".output/public"
-            elif [ -d "dist" ]; then
-              FRONTEND_DIR="dist"
-            else
-              echo "❌ No build folder found (.output/public or dist missing)"
-              exit 1
-            fi
-            echo "✅ Frontend built successfully → $FRONTEND_DIR"
-
-            echo "🐳 Building Docker image for backend..."
-            docker stop workshop-backend || true
-            docker rm workshop-backend || true
-            docker rmi workshop-backend:latest || true
-
-            # Build Docker image with verbose output
-            docker build -t workshop-backend:latest . --no-cache
-
-            # Verify the image was built successfully
-            if ! docker images | grep workshop-backend; then
-              echo "❌ Docker image build failed!"
-              exit 1
-            fi
+            echo "🐳 Building backend Docker image..."
+            sudo docker stop workshop-backend || true
+            sudo docker rm workshop-backend || true
+            sudo docker rmi workshop-backend:latest || true
+            sudo docker build -t workshop-backend:latest .
 
             echo "🚀 Running backend container..."
-            docker run -d \
+            sudo docker run -d \
               --name workshop-backend \
               -p 5000:5000 \
               --env-file .env \
               --restart unless-stopped \
               workshop-backend:latest
 
-            # Wait for container to start and check if it's running
-            echo "⏳ Waiting for backend to start..."
-            sleep 10
-
-            # Check if container is running
-            if ! docker ps | grep workshop-backend; then
-              echo "❌ Backend container failed to start!"
-              docker logs workshop-backend
-              exit 1
-            fi
-
-            # Test backend health
-            echo "🏥 Testing backend health..."
-            if curl -f -s http://localhost:5000/health > /dev/null; then
-              echo "✅ Backend health check passed!"
-            else
-              echo "⚠️ Backend health check failed, checking logs..."
-              docker logs workshop-backend --tail 20
-            fi
-
-            echo "🌐 Installing NGINX..."
+            echo "🌐 Installing and configuring NGINX..."
             sudo apt-get update -qq && sudo apt-get install -y nginx
 
-            echo "🧱 Configuring NGINX..."
-            sudo tee /etc/nginx/sites-available/workshop.conf > /dev/null <<NGINX_CONF
+            # --- Configure NGINX ---
+            sudo tee /etc/nginx/sites-available/workshop.conf > /dev/null << 'NGINX_CONF'
             server {
               listen 80;
               server_name _;
 
+              # Serve frontend build output (Nuxt/Vue)
               location / {
-                root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/$FRONTEND_DIR;
+                root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/.output/public;
                 index index.html;
-                try_files \$uri \$uri/ /index.html;
+                try_files $uri $uri/ /index.html;
               }
 
+              # Proxy backend requests
               location /api/ {
                 proxy_pass http://localhost:5000;
                 proxy_http_version 1.1;
-                proxy_set_header Upgrade \$http_upgrade;
+                proxy_set_header Upgrade $http_upgrade;
                 proxy_set_header Connection 'upgrade';
-                proxy_set_header Host \$host;
-                proxy_cache_bypass \$http_upgrade;
+                proxy_set_header Host $host;
+                proxy_cache_bypass $http_upgrade;
               }
 
+              # Healthcheck
               location /health {
                 proxy_pass http://localhost:5000/health;
               }
@@ -190,11 +102,11 @@ jobs:
             sudo rm -f /etc/nginx/sites-enabled/default
             sudo nginx -t && sudo systemctl restart nginx
 
-            echo "✅ Deployment completed successfully!"
-            echo "🌍 Frontend:  http://${{ secrets.EC2_HOST }}"
-            echo "🔧 Backend:   http://${{ secrets.EC2_HOST }}/api"
-            echo "🏥 Health:    http://${{ secrets.EC2_HOST }}/health"
+            echo "✅ Deployment complete!"
+            echo "🌍 Frontend → http://${{ secrets.EC2_HOST }}"
+            echo "🔧 Backend → http://${{ secrets.EC2_HOST }}/api"
+            echo "🏥 Health → http://${{ secrets.EC2_HOST }}/health"
 
-            echo "📊 Active Docker containers:"
-            docker ps
+            echo "📊 Current Docker containers:"
+            sudo docker ps
           EOF
