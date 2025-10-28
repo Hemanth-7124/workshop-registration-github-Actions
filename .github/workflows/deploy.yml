@@ -1,110 +1,103 @@
-name: Deploy Workshop Registration System
+name: 🚀 Deploy Workshop Registration System
 
 on:
   push:
     branches:
-      - main # Runs only when you push to main branch
+      - main  # Trigger deployment when code is pushed to main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # --- Checkout code from GitHub ---
-      - name: Checkout code
+      # ------------------------------
+      # 1️⃣ Checkout latest code
+      # ------------------------------
+      - name: 🧾 Checkout code
         uses: actions/checkout@v4
 
-      # --- Setup Node.js ---
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      # --- Verify required secrets ---
-      - name: Verify required secrets
+      # ------------------------------
+      # 2️⃣ Validate required secrets
+      # ------------------------------
+      - name: 🔐 Verify Secrets
         run: |
-          echo "🔍 Checking required secrets..."
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
-            echo "❌ Missing secret: EC2_HOST"
-            exit 1
-          fi
-          if [ -z "${{ secrets.EC2_USER }}" ]; then
-            echo "❌ Missing secret: EC2_USER"
-            exit 1
-          fi
-          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
-            echo "❌ Missing secret: EC2_SSH_KEY"
-            exit 1
-          fi
-          echo "✅ All required secrets found"
+          echo "🔍 Checking secrets..."
+          for secret in EC2_HOST EC2_USER EC2_SSH_KEY DB_HOST DB_USER DB_PASSWORD DB_NAME SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS FROM_EMAIL FROM_NAME; do
+            if [ -z "${{ secrets[$secret] }}" ]; then
+              echo "❌ Missing secret: $secret"
+              exit 1
+            fi
+          done
+          echo "✅ All secrets available."
 
-      # --- Configure SSH Key Manually ---
-      - name: Setup SSH
+      # ------------------------------
+      # 3️⃣ Configure SSH access
+      # ------------------------------
+      - name: ⚙️ Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo "✅ SSH key configured successfully"
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # --- (Optional) SSH Agent setup for compatibility ---
-      - name: Add SSH key to agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
-
-      # --- Deploy to EC2 ---
-      - name: Deploy to EC2 Server
+      # ------------------------------
+      # 4️⃣ Deploy to EC2
+      # ------------------------------
+      - name: 🚀 Deploy on EC2
         run: |
-          ssh -o ServerAliveInterval=60 -o ServerAliveCountMax=120 -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
 
-            echo "🚀 Starting deployment..."
-
-            # Go to existing app directory
+            echo "📁 Navigating to app directory..."
             APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions"
+            cd "$APP_DIR" || exit 1
 
-            cd "$APP_DIR"
+            echo "📦 Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
 
-            echo "📥 Pulling latest changes..."
-            git reset --hard
-            git pull origin main
-
-            echo "📦 Installing dependencies..."
-            npm ci
-
-            echo "🏗️ Building frontend..."
-            npm run build
-
-            echo "🧩 Updating .env file..."
+            echo "🧩 Updating environment variables..."
             cat > .env <<EOL
-            # Database Configuration
+            NODE_ENV=production
+            PORT=5000
+
+            # Database
             DB_HOST=${{ secrets.DB_HOST }}
             DB_USER=${{ secrets.DB_USER }}
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             DB_NAME=${{ secrets.DB_NAME }}
 
-            # Email Configuration
+            # Email
             SMTP_HOST=${{ secrets.SMTP_HOST }}
             SMTP_PORT=${{ secrets.SMTP_PORT }}
             SMTP_USER=${{ secrets.SMTP_USER }}
             SMTP_PASS=${{ secrets.SMTP_PASS }}
             FROM_EMAIL=${{ secrets.FROM_EMAIL }}
             FROM_NAME=${{ secrets.FROM_NAME }}
-
-            # Application Configuration
-            NODE_ENV=production
-            PORT=5000
             EOL
 
-            echo "🐳 Cleaning up old Docker containers..."
+            echo "🏗️ Building frontend..."
+            npm ci
+            npm run build
+
+            # Detect frontend output folder
+            if [ -d ".output/public" ]; then
+              FRONTEND_DIR=".output/public"
+            elif [ -d "dist" ]; then
+              FRONTEND_DIR="dist"
+            else
+              echo "❌ No build folder found (.output/public or dist missing)"
+              exit 1
+            fi
+            echo "✅ Frontend built successfully → $FRONTEND_DIR"
+
+            echo "🐳 Building Docker image for backend..."
             docker stop workshop-backend || true
             docker rm workshop-backend || true
             docker rmi workshop-backend:latest || true
-
-            echo "🔨 Building new Docker image for backend..."
             docker build -t workshop-backend:latest .
 
-            echo "🚀 Starting backend container..."
+            echo "🚀 Running backend container..."
             docker run -d \
               --name workshop-backend \
               -p 5000:5000 \
@@ -112,63 +105,48 @@ jobs:
               --restart unless-stopped \
               workshop-backend:latest
 
-            echo "🌐 Setting up frontend with nginx..."
-            sudo apt-get update -qq
-            sudo apt-get install -y nginx
+            echo "🌐 Installing NGINX..."
+            sudo apt-get update -qq && sudo apt-get install -y nginx
 
-            # Create nginx configuration
-            sudo tee /etc/nginx/sites-available/workshop-registration > /dev/null << 'NGINX_EOF'
+            echo "🧱 Configuring NGINX..."
+            sudo tee /etc/nginx/sites-available/workshop.conf > /dev/null <<NGINX_CONF
             server {
-                listen 80;
-                server_name _;
+              listen 80;
+              server_name _;
 
-                # Frontend (Nuxt build output)
-                location / {
-                    root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/.output/public;
-                    index index.html;
-                    try_files $uri $uri/ /index.html;
-                }
+              # Serve static frontend files
+              location / {
+                root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/$FRONTEND_DIR;
+                index index.html;
+                try_files \$uri \$uri/ /index.html;
+              }
 
-                # Backend API proxy
-                location /api/ {
-                    proxy_pass http://localhost:5000;
-                    proxy_http_version 1.1;
-                    proxy_set_header Upgrade $http_upgrade;
-                    proxy_set_header Connection 'upgrade';
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto $scheme;
-                    proxy_cache_bypass $http_upgrade;
-                }
+              # Proxy API requests to backend
+              location /api/ {
+                proxy_pass http://localhost:5000;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade \$http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_set_header Host \$host;
+                proxy_cache_bypass \$http_upgrade;
+              }
 
-                # Health check
-                location /health {
-                    proxy_pass http://localhost:5000/health;
-                    proxy_http_version 1.1;
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto $scheme;
-                }
+              # Health check endpoint
+              location /health {
+                proxy_pass http://localhost:5000/health;
+              }
             }
-            NGINX_EOF
+            NGINX_CONF
 
-            # Enable the site
-            sudo ln -sf /etc/nginx/sites-available/workshop-registration /etc/nginx/sites-enabled/
+            sudo ln -sf /etc/nginx/sites-available/workshop.conf /etc/nginx/sites-enabled/
             sudo rm -f /etc/nginx/sites-enabled/default
-
-            # Test and restart nginx
             sudo nginx -t && sudo systemctl restart nginx
 
             echo "✅ Deployment completed successfully!"
-            echo "🌐 Frontend → http://${{ secrets.EC2_HOST }}"
-            echo "🔧 Backend  → http://${{ secrets.EC2_HOST }}/api"
-            echo "🏥 Health  → http://${{ secrets.EC2_HOST }}/health"
+            echo "🌍 Frontend:  http://${{ secrets.EC2_HOST }}"
+            echo "🔧 Backend:   http://${{ secrets.EC2_HOST }}/api"
+            echo "🏥 Health:    http://${{ secrets.EC2_HOST }}/health"
 
-            echo "📊 Active containers:"
-            docker ps | grep workshop-backend || echo "⚠️ Backend container not running!"
-
-            echo "🌐 Frontend status:"
-            sudo systemctl status nginx --no-pager || echo "⚠️ Nginx not running!"
+            echo "📊 Active Docker containers:"
+            docker ps
           EOF
