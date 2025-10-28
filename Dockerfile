@@ -29,8 +29,8 @@ RUN npm ci --only=production && npm cache clean --force
 COPY --from=build /app/server ./server
 COPY --from=build /app/service ./service
 
-# Copy env placeholder (actual .env added at runtime)
-COPY .env .env
+# Create .env placeholder (actual .env added at runtime via docker run --env-file)
+RUN touch .env
 
 # Create secure non-root user
 RUN addgroup -S nodejs && adduser -S nodejs -G nodejs && chown -R nodejs:nodejs /app

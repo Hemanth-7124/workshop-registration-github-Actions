@@ -95,6 +95,9 @@ jobs:
             SMTP_PASS=${{ secrets.SMTP_PASS }}
             FROM_EMAIL=${{ secrets.FROM_EMAIL }}
             FROM_NAME=${{ secrets.FROM_NAME }}
+
+            # CORS
+            CORS_ORIGIN=http://${{ secrets.EC2_HOST }}
             EOL
 
             echo "🏗️ Building frontend..."
@@ -115,7 +118,15 @@ jobs:
             docker stop workshop-backend || true
             docker rm workshop-backend || true
             docker rmi workshop-backend:latest || true
-            docker build -t workshop-backend:latest .
+
+            # Build Docker image with verbose output
+            docker build -t workshop-backend:latest . --no-cache
+
+            # Verify the image was built successfully
+            if ! docker images | grep workshop-backend; then
+              echo "❌ Docker image build failed!"
+              exit 1
+            fi
 
             echo "🚀 Running backend container..."
             docker run -d \
@@ -124,6 +135,26 @@ jobs:
               --env-file .env \
               --restart unless-stopped \
               workshop-backend:latest
+
+            # Wait for container to start and check if it's running
+            echo "⏳ Waiting for backend to start..."
+            sleep 10
+
+            # Check if container is running
+            if ! docker ps | grep workshop-backend; then
+              echo "❌ Backend container failed to start!"
+              docker logs workshop-backend
+              exit 1
+            fi
+
+            # Test backend health
+            echo "🏥 Testing backend health..."
+            if curl -f -s http://localhost:5000/health > /dev/null; then
+              echo "✅ Backend health check passed!"
+            else
+              echo "⚠️ Backend health check failed, checking logs..."
+              docker logs workshop-backend --tail 20
+            fi
 
             echo "🌐 Installing NGINX..."
             sudo apt-get update -qq && sudo apt-get install -y nginx
