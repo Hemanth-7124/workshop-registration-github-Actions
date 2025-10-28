@@ -1,4 +1,5 @@
 <template>
+  
   <div class="registration-container">
     <div class="form-card">
       <div class="form-header">
