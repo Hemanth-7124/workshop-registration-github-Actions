@@ -61,21 +61,21 @@ jobs:
 
             echo "🧩 Updating .env file..."
             cat > .env <<EOL
-DB_HOST=${{ secrets.DB_HOST }}
-DB_USER=${{ secrets.DB_USER }}
-DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-DB_NAME=${{ secrets.DB_NAME }}
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
 
-SMTP_HOST=${{ secrets.SMTP_HOST }}
-SMTP_PORT=${{ secrets.SMTP_PORT }}
-SMTP_USER=${{ secrets.SMTP_USER }}
-SMTP_PASS=${{ secrets.SMTP_PASS }}
-FROM_EMAIL=${{ secrets.FROM_EMAIL }}
-FROM_NAME=${{ secrets.FROM_NAME }}
+            SMTP_HOST=${{ secrets.SMTP_HOST }}
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_PASS=${{ secrets.SMTP_PASS }}
+            FROM_EMAIL=${{ secrets.FROM_EMAIL }}
+            FROM_NAME=${{ secrets.FROM_NAME }}
 
-PORT=${{ secrets.PORT }}
-API_BASE_URL=${{ secrets.API_BASE_URL }}
-EOL
+            PORT=${{ secrets.PORT }}
+            API_BASE_URL=${{ secrets.API_BASE_URL }}
+            EOL
 
             echo "🐳 Cleaning up old Docker containers..."
             docker stop workshop-app || true
