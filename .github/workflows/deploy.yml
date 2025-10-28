@@ -21,14 +21,35 @@ jobs:
       # ------------------------------
       - name: 🔐 Verify Secrets
         run: |
-          echo "🔍 Checking secrets..."
-          for secret in EC2_HOST EC2_USER EC2_SSH_KEY DB_HOST DB_USER DB_PASSWORD DB_NAME SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS FROM_EMAIL FROM_NAME; do
-            if [ -z "${{ secrets[$secret] }}" ]; then
-              echo "❌ Missing secret: $secret"
-              exit 1
+          echo "🔍 Checking required secrets..."
+          missing=false
+          
+          check_secret() {
+            if [ -z "$1" ]; then
+              echo "❌ Missing secret: $2"
+              missing=true
             fi
-          done
-          echo "✅ All secrets available."
+          }
+
+          check_secret "${{ secrets.EC2_HOST }}" "EC2_HOST"
+          check_secret "${{ secrets.EC2_USER }}" "EC2_USER"
+          check_secret "${{ secrets.EC2_SSH_KEY }}" "EC2_SSH_KEY"
+          check_secret "${{ secrets.DB_HOST }}" "DB_HOST"
+          check_secret "${{ secrets.DB_USER }}" "DB_USER"
+          check_secret "${{ secrets.DB_PASSWORD }}" "DB_PASSWORD"
+          check_secret "${{ secrets.DB_NAME }}" "DB_NAME"
+          check_secret "${{ secrets.SMTP_HOST }}" "SMTP_HOST"
+          check_secret "${{ secrets.SMTP_PORT }}" "SMTP_PORT"
+          check_secret "${{ secrets.SMTP_USER }}" "SMTP_USER"
+          check_secret "${{ secrets.SMTP_PASS }}" "SMTP_PASS"
+          check_secret "${{ secrets.FROM_EMAIL }}" "FROM_EMAIL"
+          check_secret "${{ secrets.FROM_NAME }}" "FROM_NAME"
+
+          if [ "$missing" = true ]; then
+            exit 1
+          fi
+          
+          echo "✅ All secrets are available."
 
       # ------------------------------
       # 3️⃣ Configure SSH access
@@ -80,7 +101,6 @@ jobs:
             npm ci
             npm run build
 
-            # Detect frontend output folder
             if [ -d ".output/public" ]; then
               FRONTEND_DIR=".output/public"
             elif [ -d "dist" ]; then
@@ -114,14 +134,12 @@ jobs:
               listen 80;
               server_name _;
 
-              # Serve static frontend files
               location / {
                 root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/$FRONTEND_DIR;
                 index index.html;
                 try_files \$uri \$uri/ /index.html;
               }
 
-              # Proxy API requests to backend
               location /api/ {
                 proxy_pass http://localhost:5000;
                 proxy_http_version 1.1;
@@ -131,7 +149,6 @@ jobs:
                 proxy_cache_bypass \$http_upgrade;
               }
 
-              # Health check endpoint
               location /health {
                 proxy_pass http://localhost:5000/health;
               }
