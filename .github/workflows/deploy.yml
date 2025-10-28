@@ -1,4 +1,4 @@
-name: Fullstack App Deployment to EC2
+name: Deploy Workshop Registration System
 
 on:
   push:
@@ -77,11 +77,13 @@ jobs:
 
             echo "🧩 Updating .env file..."
             cat > .env <<EOL
+            # Database Configuration
             DB_HOST=${{ secrets.DB_HOST }}
             DB_USER=${{ secrets.DB_USER }}
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             DB_NAME=${{ secrets.DB_NAME }}
 
+            # Email Configuration
             SMTP_HOST=${{ secrets.SMTP_HOST }}
             SMTP_PORT=${{ secrets.SMTP_PORT }}
             SMTP_USER=${{ secrets.SMTP_USER }}
@@ -89,31 +91,84 @@ jobs:
             FROM_EMAIL=${{ secrets.FROM_EMAIL }}
             FROM_NAME=${{ secrets.FROM_NAME }}
 
-            PORT=${{ secrets.PORT }}
-            API_BASE_URL=${{ secrets.API_BASE_URL }}
+            # Application Configuration
+            NODE_ENV=production
+            PORT=5000
             EOL
 
             echo "🐳 Cleaning up old Docker containers..."
-            docker stop workshop-app || true
-            docker rm workshop-app || true
-            docker rmi workshop-app:latest || true
+            docker stop workshop-backend || true
+            docker rm workshop-backend || true
+            docker rmi workshop-backend:latest || true
 
-            echo "🔨 Building new Docker image..."
-            docker build -t workshop-app:latest .
+            echo "🔨 Building new Docker image for backend..."
+            docker build -t workshop-backend:latest .
 
-            echo "🚀 Starting updated container..."
+            echo "🚀 Starting backend container..."
             docker run -d \
-              --name workshop-app \
-              -p 3000:3000 \
+              --name workshop-backend \
               -p 5000:5000 \
               --env-file .env \
               --restart unless-stopped \
-              workshop-app:latest
+              workshop-backend:latest
+
+            echo "🌐 Setting up frontend with nginx..."
+            sudo apt-get update -qq
+            sudo apt-get install -y nginx
+
+            # Create nginx configuration
+            sudo tee /etc/nginx/sites-available/workshop-registration > /dev/null << 'NGINX_EOF'
+            server {
+                listen 80;
+                server_name _;
+
+                # Frontend (Nuxt build output)
+                location / {
+                    root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/.output/public;
+                    index index.html;
+                    try_files $uri $uri/ /index.html;
+                }
+
+                # Backend API proxy
+                location /api/ {
+                    proxy_pass http://localhost:5000;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                    proxy_cache_bypass $http_upgrade;
+                }
+
+                # Health check
+                location /health {
+                    proxy_pass http://localhost:5000/health;
+                    proxy_http_version 1.1;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                }
+            }
+            NGINX_EOF
+
+            # Enable the site
+            sudo ln -sf /etc/nginx/sites-available/workshop-registration /etc/nginx/sites-enabled/
+            sudo rm -f /etc/nginx/sites-enabled/default
+
+            # Test and restart nginx
+            sudo nginx -t && sudo systemctl restart nginx
 
             echo "✅ Deployment completed successfully!"
-            echo "🌐 Frontend → http://${{ secrets.EC2_HOST }}:3000"
-            echo "🔧 Backend  → http://${{ secrets.EC2_HOST }}:5000"
+            echo "🌐 Frontend → http://${{ secrets.EC2_HOST }}"
+            echo "🔧 Backend  → http://${{ secrets.EC2_HOST }}/api"
+            echo "🏥 Health  → http://${{ secrets.EC2_HOST }}/health"
 
             echo "📊 Active containers:"
-            docker ps | grep workshop-app || echo "⚠️ Container not running!"
+            docker ps | grep workshop-backend || echo "⚠️ Backend container not running!"
+
+            echo "🌐 Frontend status:"
+            sudo systemctl status nginx --no-pager || echo "⚠️ Nginx not running!"
           EOF
