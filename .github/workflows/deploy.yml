@@ -1,16 +1,16 @@
-name: Fullstack Deploy to EC2
+name: Fullstack App Deployment to EC2
 
 on:
   push:
     branches:
-      - main   # trigger only when you push to main
+      - main # Runs only when you push to main branch
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # --- Checkout the repository ---
+      # --- Checkout code from GitHub ---
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -20,85 +20,72 @@ jobs:
         with:
           node-version: 20
 
-      # --- Verify required secrets are available ---
-      - name: Verify secrets
+      # --- Verify required secrets ---
+      - name: Verify required secrets
         run: |
-          echo "Checking required secrets..."
-          if [ -z "${{ secrets.EC2_HOST }}" ]; then
-            echo "❌ EC2_HOST secret is missing"
-            exit 1
-          fi
-          if [ -z "${{ secrets.EC2_USER }}" ]; then
-            echo "❌ EC2_USER secret is missing"
-            exit 1
-          fi
-          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
-            echo "❌ EC2_SSH_KEY secret is missing"
-            exit 1
-          fi
-          echo "✅ All required secrets are available"
+          for secret in EC2_HOST EC2_USER EC2_SSH_KEY; do
+            if [ -z "${{ secrets[$secret] }}" ]; then
+              echo "❌ Missing secret: $secret"
+              exit 1
+            fi
+          done
+          echo "✅ All required secrets found"
 
-      # --- Deploy full application to EC2 ---
-      - name: Setup SSH Agent
+      # --- Configure SSH Agent ---
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Deploy application to EC2
+      # --- Deploy to EC2 ---
+      - name: Deploy to EC2 Server
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-            set -e  # Exit on any error
+            set -e
 
-            echo "🚀 Starting deployment to EC2..."
+            echo "🚀 Starting deployment..."
 
-            # Create project directory if it doesn't exist
-            mkdir -p /home/${{ secrets.EC2_USER }}/workshop-registration
-            cd /home/${{ secrets.EC2_USER }}/workshop-registration
+            # Go to existing app directory
+            APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration"
+            cd "$APP_DIR"
 
-            # Clone or pull the latest code
-            if [ ! -d ".git" ]; then
-              echo "📥 Cloning repository..."
-              git clone https://github.com/${{ github.repository }}.git .
-            else
-              echo "📥 Pulling latest changes..."
-              git pull origin main
-            fi
+            echo "📥 Pulling latest changes..."
+            git reset --hard
+            git pull origin main
 
-            echo "🛑 Stopping old container..."
+            echo "📦 Installing dependencies..."
+            npm ci
+
+            echo "🏗️ Building frontend..."
+            npm run build
+
+            echo "🧩 Updating .env file..."
+            cat > .env <<EOL
+DB_HOST=${{ secrets.DB_HOST }}
+DB_USER=${{ secrets.DB_USER }}
+DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+DB_NAME=${{ secrets.DB_NAME }}
+
+SMTP_HOST=${{ secrets.SMTP_HOST }}
+SMTP_PORT=${{ secrets.SMTP_PORT }}
+SMTP_USER=${{ secrets.SMTP_USER }}
+SMTP_PASS=${{ secrets.SMTP_PASS }}
+FROM_EMAIL=${{ secrets.FROM_EMAIL }}
+FROM_NAME=${{ secrets.FROM_NAME }}
+
+PORT=${{ secrets.PORT }}
+API_BASE_URL=${{ secrets.API_BASE_URL }}
+EOL
+
+            echo "🐳 Cleaning up old Docker containers..."
             docker stop workshop-app || true
             docker rm workshop-app || true
-
-            echo "🗑️  Removing old image..."
             docker rmi workshop-app:latest || true
 
             echo "🔨 Building new Docker image..."
             docker build -t workshop-app:latest .
 
-            # Check if .env file exists, create a template if it doesn't
-            if [ ! -f ".env" ]; then
-              echo "⚠️  .env file not found. Creating template..."
-              cat > .env << EOL
-            # Database Configuration
-            DB_HOST=localhost
-            DB_USER=root
-            DB_PASSWORD=your_db_password
-            DB_NAME=workshop_registration
-
-            # Email Configuration
-            SMTP_HOST=smtp.gmail.com
-            SMTP_PORT=587
-            SMTP_USER=your_email@gmail.com
-            SMTP_PASS=your_app_password
-            FROM_EMAIL=your_email@gmail.com
-
-            # Application Configuration
-            NODE_ENV=production
-            PORT=5000
-            EOL
-              echo "📝 Please update .env file with your actual values"
-            fi
-
-            echo "🚀 Running new container..."
+            echo "🚀 Starting updated container..."
             docker run -d \
               --name workshop-app \
               -p 3000:3000 \
@@ -108,10 +95,9 @@ jobs:
               workshop-app:latest
 
             echo "✅ Deployment completed successfully!"
-            echo "🌐 Frontend should be available at http://${{ secrets.EC2_HOST }}:3000"
-            echo "🔧 Backend API should be available at http://${{ secrets.EC2_HOST }}:5000"
+            echo "🌐 Frontend → http://${{ secrets.EC2_HOST }}:3000"
+            echo "🔧 Backend  → http://${{ secrets.EC2_HOST }}:5000"
 
-            # Show container status
-            echo "📊 Container status:"
-            docker ps | grep workshop-app || echo "Container not running"
+            echo "📊 Active containers:"
+            docker ps | grep workshop-app || echo "⚠️ Container not running!"
           EOF
