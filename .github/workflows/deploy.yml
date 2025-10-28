@@ -23,13 +23,20 @@ jobs:
       # --- Verify required secrets ---
       - name: Verify required secrets
         run: |
-          for secret in EC2_HOST EC2_USER EC2_SSH_KEY; do
-            if [ -z "${{ secrets[$secret] }}" ]; then
-              echo "❌ Missing secret: $secret"
-              exit 1
-            fi
-          done
-          echo "✅ All required secrets found"
+         echo "🔍 Checking required secrets..."
+         if [ -z "${{ secrets.EC2_HOST }}" ]; then
+         echo "❌ Missing secret: EC2_HOST"
+         exit 1
+         fi
+         if [ -z "${{ secrets.EC2_USER }}" ]; then
+         echo "❌ Missing secret: EC2_USER"
+         exit 1
+         fi
+         if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
+         echo "❌ Missing secret: EC2_SSH_KEY"
+         exit 1
+         fi
+         echo "✅ All required secrets found"
 
       # --- Configure SSH Agent ---
       - name: Setup SSH
