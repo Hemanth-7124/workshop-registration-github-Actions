@@ -1,24 +1,20 @@
-name: Deploy Workshop App to EC2
+name: 🚀 Deploy Workshop App
 
 on:
   push:
     branches:
-      - main  # Deploy only on main branch
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------------------------------------
       # 1️⃣ Checkout Code
-      # ---------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------
-      # 2️⃣ Setup SSH for EC2 Access
-      # ---------------------------------------
+      # 2️⃣ Setup SSH
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -26,14 +22,11 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # ---------------------------------------
       # 3️⃣ Deploy to EC2
-      # ---------------------------------------
       - name: 🚀 Deploy to EC2
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
-
             APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions"
             cd "$APP_DIR"
 
@@ -41,11 +34,25 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            echo "🧾 Checking for .env file..."
-            if [ ! -f .env ]; then
-              echo "❌ Missing .env file in EC2 directory!"
-              exit 1
-            fi
+            echo "🧾 Writing clean .env file..."
+            cat > .env <<EOL
+            NODE_ENV=production
+            PORT=5000
+
+            # Database
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ secrets.DB_NAME }}
+
+            # Email
+            SMTP_HOST=${{ secrets.SMTP_HOST }}
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_PASS=${{ secrets.SMTP_PASS }}
+            FROM_EMAIL=${{ secrets.FROM_EMAIL }}
+            FROM_NAME=${{ secrets.FROM_NAME }}
+            EOL
 
             echo "🏗️ Building frontend..."
             npm ci
@@ -68,20 +75,19 @@ jobs:
             echo "🌐 Installing and configuring NGINX..."
             sudo apt-get update -qq && sudo apt-get install -y nginx
 
-            # --- Configure NGINX ---
             sudo tee /etc/nginx/sites-available/workshop.conf > /dev/null << 'NGINX_CONF'
             server {
               listen 80;
               server_name _;
 
-              # Serve frontend build output (Nuxt/Vue)
+              # Frontend (Nuxt/Vue build)
               location / {
                 root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/.output/public;
                 index index.html;
                 try_files $uri $uri/ /index.html;
               }
 
-              # Proxy backend requests
+              # Backend API
               location /api/ {
                 proxy_pass http://localhost:5000;
                 proxy_http_version 1.1;
@@ -91,7 +97,7 @@ jobs:
                 proxy_cache_bypass $http_upgrade;
               }
 
-              # Healthcheck
+              # Health check
               location /health {
                 proxy_pass http://localhost:5000/health;
               }
@@ -107,6 +113,6 @@ jobs:
             echo "🔧 Backend → http://${{ secrets.EC2_HOST }}/api"
             echo "🏥 Health → http://${{ secrets.EC2_HOST }}/health"
 
-            echo "📊 Current Docker containers:"
+            echo "📊 Active Docker containers:"
             sudo docker ps
           EOF
