@@ -1,0 +1,61 @@
+name: Fullstack Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main   # trigger only when you push to main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # --- Checkout the repository ---
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --- Setup Node.js for building frontend ---
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # ---------- FRONTEND ----------
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Nuxt app
+        run: npm run build
+
+      - name: Upload frontend build to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: ".output/public/"
+          target: "/home/${{ secrets.EC2_USER }}/frontend"
+
+      # ---------- BACKEND ----------
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Deploy backend container to EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd /home/${{ secrets.EC2_USER }}/workshop-registration
+            git pull origin main
+
+            echo "Stopping old backend container..."
+            docker stop backend || true
+            docker rm backend || true
+
+            echo "Building new Docker image..."
+            docker build -t backend .
+
+            echo "Running new backend container on port 5000..."
+            docker run -d --name backend -p 5000:5000 \
+              --env-file .env backend
+          EOF
