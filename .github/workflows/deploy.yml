@@ -61,7 +61,8 @@ jobs:
             echo "🚀 Starting deployment..."
 
             # Go to existing app directory
-            APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration"
+            APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions"
+
             cd "$APP_DIR"
 
             echo "📥 Pulling latest changes..."
