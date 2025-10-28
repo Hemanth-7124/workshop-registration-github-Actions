@@ -23,23 +23,31 @@ jobs:
       # --- Verify required secrets ---
       - name: Verify required secrets
         run: |
-         echo "🔍 Checking required secrets..."
-         if [ -z "${{ secrets.EC2_HOST }}" ]; then
-         echo "❌ Missing secret: EC2_HOST"
-         exit 1
-         fi
-         if [ -z "${{ secrets.EC2_USER }}" ]; then
-         echo "❌ Missing secret: EC2_USER"
-         exit 1
-         fi
-         if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
-         echo "❌ Missing secret: EC2_SSH_KEY"
-         exit 1
-         fi
-         echo "✅ All required secrets found"
+          echo "🔍 Checking required secrets..."
+          if [ -z "${{ secrets.EC2_HOST }}" ]; then
+            echo "❌ Missing secret: EC2_HOST"
+            exit 1
+          fi
+          if [ -z "${{ secrets.EC2_USER }}" ]; then
+            echo "❌ Missing secret: EC2_USER"
+            exit 1
+          fi
+          if [ -z "${{ secrets.EC2_SSH_KEY }}" ]; then
+            echo "❌ Missing secret: EC2_SSH_KEY"
+            exit 1
+          fi
+          echo "✅ All required secrets found"
 
-      # --- Configure SSH Agent ---
+      # --- Configure SSH Key Manually ---
       - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "✅ SSH key configured successfully"
+
+      # --- (Optional) SSH Agent setup for compatibility ---
+      - name: Add SSH key to agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
