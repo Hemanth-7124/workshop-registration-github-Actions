@@ -10,9 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout repo
       - name: 🧾 Checkout Repository
         uses: actions/checkout@v4
 
+      # Step 2: Setup SSH connection
       - name: 🔐 Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -20,6 +22,7 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
+      # Step 3: Deploy to EC2
       - name: 🚀 Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -27,54 +30,69 @@ jobs:
           GIT_REPO_URL: ${{ secrets.GIT_REPO_URL }}
         run: |
           echo "🔧 Starting deployment on EC2..."
-          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << 'EOF'
-            set -e  # stop on error
+
+          # send the environment variables to remote shell
+          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST \
+          "export GIT_REPO_URL='${GIT_REPO_URL}'; export EC2_USER='${EC2_USER}'; export EC2_HOST='${EC2_HOST}'; bash -s" << 'EOF'
+            set -e
 
             APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
 
-            echo "📁 Checking repository..."
+            echo "📦 Checking repository..."
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "🌀 Cloning repository..."
               git clone "$GIT_REPO_URL" "$APP_DIR"
+            else
+              echo "🔄 Pulling latest code..."
+              cd "$APP_DIR"
+              git fetch origin main
+              git reset --hard origin/main
             fi
 
             cd "$APP_DIR"
-            echo "🔄 Pulling latest code..."
-            git fetch origin main
-            git reset --hard origin/main
 
             echo "🧹 Cleaning old backend container..."
             sudo docker stop workshop-backend >/dev/null 2>&1 || true
             sudo docker rm workshop-backend >/dev/null 2>&1 || true
+            sudo docker rmi workshop-backend:latest >/dev/null 2>&1 || true
 
             echo "🐳 Building backend Docker image..."
             sudo docker build -t workshop-backend:latest .
 
-            echo "🚀 Starting backend container..."
+            echo "🚀 Running backend container..."
             sudo docker run -d \
               --name workshop-backend \
               -p 5000:5000 \
               --env-file .env \
               --restart unless-stopped \
-              workshop-backend:latest || { echo "❌ Backend failed to start"; exit 1; }
+              workshop-backend:latest
 
-            echo "🔍 Checking backend container status..."
-            sudo docker ps | grep workshop-backend || { echo "❌ Backend not running"; exit 1; }
-
-            echo "📦 Installing frontend..."
-            npm ci --prefer-offline --no-audit --progress=false
+            echo "📦 Installing frontend dependencies..."
+            if [ -d node_modules ]; then
+              echo "✅ Using existing node_modules"
+            else
+              npm install --prefer-offline --no-audit --progress=false
+            fi
 
             echo "⚙️ Building frontend..."
             npm run build
 
-            echo "🌐 Starting frontend (Nuxt) on port 3000..."
+            echo "🌐 Restarting Nuxt frontend on port 3000..."
             pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
-            nohup npm run preview -- --port 3000 > ~/frontend.log 2>&1 &
+            sleep 2
+
+            LOG_FILE="/home/$EC2_USER/frontend.log"
+            nohup bash -c "npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" &
 
             sleep 5
-            pgrep -f 'node .output/server/index.mjs' >/dev/null && echo "✅ Frontend running" || { echo "❌ Frontend failed"; exit 1; }
+            if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
+              echo "✅ Frontend running successfully!"
+            else
+              echo "❌ Frontend failed to start. Check logs at $LOG_FILE"
+            fi
 
-            echo "✅ Deployment complete!"
+            echo "✅ Deployment completed successfully!"
             echo "Backend → http://$EC2_HOST:5000"
             echo "Frontend → http://$EC2_HOST:3000"
+            exit 0
           EOF
