@@ -1,4 +1,4 @@
-name: 🚀 Fullstack Deploy to EC2
+name: Fullstack Auto Deploy to EC2
 
 on:
   push:
@@ -10,72 +10,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout code
-      - name: 📦 Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup SSH
-      - name: 🔐 Setup SSH
+      - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key.pem
+          chmod 600 ~/.ssh/ec2_key.pem
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # Step 3: Deploy to EC2
-      - name: 🚀 Deploy on EC2
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          GIT_REPO_URL: ${{ secrets.GIT_REPO_URL }}
+      - name: Copy project files to EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "bash -s" <<'EOF'
-            set -e
+          echo "📦 Uploading project to EC2..."
+          rsync -avz -e "ssh -i ~/.ssh/ec2_key.pem" --exclude node_modules --exclude .git ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/workshop-registration-github-Actions
 
-            APP_DIR="/home/$USER/workshop-registration-github-Actions"
-            BRANCH="main"
+      - name: Deploy on EC2
+        run: |
+          echo "🚀 Starting remote deployment..."
+          ssh -i ~/.ssh/ec2_key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/workshop-registration-github-Actions
 
-            echo "🌀 Starting deployment on EC2..."
+            echo "🐳 Cleaning old Docker containers and images..."
+            docker stop backend || true
+            docker rm backend || true
+            docker stop frontend || true
+            docker rm frontend || true
+            docker system prune -af || true
 
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "📥 Cloning repository..."
-              git clone "${GIT_REPO_URL}" "$APP_DIR"
-            else
-              echo "🔄 Pulling latest code..."
-              cd "$APP_DIR"
-              git fetch origin $BRANCH
-              git reset --hard origin/$BRANCH
-            fi
-
-            cd "$APP_DIR"
-
-            echo "🧹 Cleaning old backend containers..."
-            sudo docker stop workshop-backend >/dev/null 2>&1 || true
-            sudo docker rm workshop-backend >/dev/null 2>&1 || true
-            sudo docker rmi workshop-backend:latest >/dev/null 2>&1 || true
-
-            echo "🐳 Building backend Docker image..."
-            sudo docker build -t workshop-backend:latest .
+            echo "🔧 Building new backend Docker image..."
+            docker build -t workshop-backend -f Dockerfile .
 
             echo "🚀 Running backend container..."
-            sudo docker run -d \
-              --name workshop-backend \
-              -p 5000:5000 \
-              --env-file .env \
-              --restart unless-stopped \
-              workshop-backend:latest
+            docker run -d --name backend -p 5000:5000 --env-file .env workshop-backend
 
-            echo "🧰 Installing frontend dependencies..."
-            npm ci --prefer-offline --no-audit --progress=false
-
-            echo "⚙️ Building frontend..."
+            echo "🧱 Building frontend (Nuxt) app..."
+            npm install
             npm run build
 
-            echo "🌐 Starting Nuxt frontend on port 3000..."
-            pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
-            nohup bash -c "npm run preview -- --port 3000 > frontend.log 2>&1 &" >/dev/null 2>&1 & disown
+            echo "🌍 Starting frontend app on port 3000..."
+            nohup npm run start -- -p 3000 > frontend.log 2>&1 &
 
             echo "✅ Deployment completed successfully!"
-            echo "Backend → http://${EC2_HOST}:5000"
-            echo "Frontend → http://${EC2_HOST}:3000"
-            EOF
+          EOF
