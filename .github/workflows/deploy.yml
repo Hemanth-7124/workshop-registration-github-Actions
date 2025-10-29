@@ -10,11 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout Repository
+      # Checkout Code
       - name: 🧾 Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup SSH
+      # Setup SSH
       - name: 🔐 Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -22,7 +22,7 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # Step 3: Deploy to EC2
+      # Deploy to EC2
       - name: 🚀 Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -31,34 +31,31 @@ jobs:
         run: |
           echo "🔧 Starting deployment on EC2..."
 
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "bash -s" <<EOF
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "bash -s" <<'EOF'
             set -e
 
-            export GIT_REPO_URL="${GIT_REPO_URL}"
-            export EC2_USER="${EC2_USER}"
-            export EC2_HOST="${EC2_HOST}"
-
-            APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
+            APP_DIR="/home/$USER/workshop-registration-github-Actions"
+            BRANCH="main"
 
             echo "📦 Checking repository..."
-            if [ ! -d "\$APP_DIR/.git" ]; then
-              echo "🌀 Cloning repository from \$GIT_REPO_URL ..."
-              git clone "\$GIT_REPO_URL" "\$APP_DIR"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "🌀 Cloning repository from ${GIT_REPO_URL} ..."
+              git clone "${GIT_REPO_URL}" "$APP_DIR"
             else
-              echo "🔄 Pulling latest code (main branch)..."
-              cd "\$APP_DIR"
-              git fetch origin main
-              git reset --hard origin/main
+              echo "🔄 Pulling latest code from branch: $BRANCH ..."
+              cd "$APP_DIR"
+              git fetch origin $BRANCH
+              git reset --hard origin/$BRANCH
             fi
 
-            cd "\$APP_DIR"
+            cd "$APP_DIR"
 
-            echo "🧹 Cleaning old backend containers/images..."
+            echo "🧹 Cleaning old backend container..."
             sudo docker stop workshop-backend >/dev/null 2>&1 || true
             sudo docker rm workshop-backend >/dev/null 2>&1 || true
             sudo docker rmi workshop-backend:latest >/dev/null 2>&1 || true
 
-            echo "🐳 Building backend Docker image..."
+            echo "🐳 Building new backend Docker image..."
             sudo docker build -t workshop-backend:latest .
 
             echo "🚀 Running backend container..."
@@ -70,11 +67,7 @@ jobs:
               workshop-backend:latest
 
             echo "📦 Installing frontend dependencies..."
-            if [ -d node_modules ]; then
-              echo "✅ Using existing node_modules"
-            else
-              npm install --prefer-offline --no-audit --progress=false
-            fi
+            npm ci --prefer-offline --no-audit --progress=false
 
             echo "⚙️ Building frontend..."
             npm run build
@@ -82,22 +75,10 @@ jobs:
             echo "🌐 Restarting Nuxt frontend on port 3000..."
             pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
             sleep 2
-
-            LOG_FILE="/home/\$EC2_USER/frontend.log"
-            nohup bash -c "npm run preview -- --port 3000 > \$LOG_FILE 2>&1 &" >/dev/null 2>&1 & disown
-
-            sleep 5
-            if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
-              echo "✅ Frontend running successfully!"
-            else
-              echo "❌ Frontend failed to start. Check logs at \$LOG_FILE"
-            fi
+            LOG_FILE="/home/$USER/frontend.log"
+            nohup bash -c "npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" >/dev/null 2>&1 & disown
 
             echo "✅ Deployment completed successfully!"
-            echo "Backend → http://\$EC2_HOST:5000"
-            echo "Frontend → http://\$EC2_HOST:3000"
-
-            exit 0
+            echo "Backend:  http://15.207.147.198:5000"
+            echo "Frontend: http://15.207.147.198:3000"
             EOF
-
-          echo "🎉 Deployment script completed successfully — no SSH disconnects!"
