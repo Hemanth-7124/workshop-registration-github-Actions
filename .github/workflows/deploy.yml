@@ -79,4 +79,4 @@ jobs:
             echo "✅ Deployment completed successfully!"
             echo "Backend running on:  http://${EC2_HOST}:5000"
             echo "Frontend running on: http://${EC2_HOST}:3000"
-EOF
+            EOF
