@@ -14,7 +14,7 @@ jobs:
       - name: 🧾 Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup SSH connection
+      # Step 2: Setup SSH
       - name: 🔐 Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -22,7 +22,7 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # Step 3: Deploy to EC2
+      # Step 3: Deploy
       - name: 🚀 Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -31,25 +31,23 @@ jobs:
         run: |
           echo "🔧 Starting deployment on EC2..."
 
-          # send the environment variables to remote shell
-          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST \
-          "export GIT_REPO_URL='${GIT_REPO_URL}'; export EC2_USER='${EC2_USER}'; export EC2_HOST='${EC2_HOST}'; bash -s" << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST <<EOF
             set -e
 
             APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
 
             echo "📦 Checking repository..."
-            if [ ! -d "$APP_DIR/.git" ]; then
+            if [ ! -d "\$APP_DIR/.git" ]; then
               echo "🌀 Cloning repository..."
-              git clone "$GIT_REPO_URL" "$APP_DIR"
+              git clone "$GIT_REPO_URL" "\$APP_DIR"
             else
               echo "🔄 Pulling latest code..."
-              cd "$APP_DIR"
+              cd "\$APP_DIR"
               git fetch origin main
               git reset --hard origin/main
             fi
 
-            cd "$APP_DIR"
+            cd "\$APP_DIR"
 
             echo "🧹 Cleaning old backend container..."
             sudo docker stop workshop-backend >/dev/null 2>&1 || true
@@ -82,17 +80,18 @@ jobs:
             sleep 2
 
             LOG_FILE="/home/$EC2_USER/frontend.log"
-            nohup bash -c "npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" &
+            nohup bash -c "npm run preview -- --port 3000 > \$LOG_FILE 2>&1 &" &
 
             sleep 5
             if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
               echo "✅ Frontend running successfully!"
             else
-              echo "❌ Frontend failed to start. Check logs at $LOG_FILE"
+              echo "❌ Frontend failed to start. Check logs at \$LOG_FILE"
             fi
 
             echo "✅ Deployment completed successfully!"
             echo "Backend → http://$EC2_HOST:5000"
             echo "Frontend → http://$EC2_HOST:3000"
-            exit 0
-          EOF
+            EOF
+
+           echo "🎉 Deployment script completed without SSH exit error!"
