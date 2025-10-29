@@ -73,24 +73,22 @@ jobs:
             echo "⚙️ Building frontend..."
             npm run build
 
-            echo "🌐 Restarting Nuxt frontend..."
-            # Kill any existing process
+            echo "🌐 Restarting frontend (Nuxt) on port 3000..."
             pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
             sleep 2
 
-            # Start detached process safely using nohup + setsid
             LOG_FILE="/home/$EC2_USER/frontend.log"
-            echo "Starting Nuxt on port 3000..."
+            echo "Starting Nuxt frontend..."
             nohup bash -c "setsid npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" &
 
             sleep 3
             if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
-              echo "✅ Nuxt frontend running successfully!"
+              echo "✅ Frontend running successfully!"
             else
-              echo "❌ Failed to start Nuxt frontend. Check $LOG_FILE"
+              echo "❌ Frontend failed to start. Check logs at $LOG_FILE"
             fi
 
-            echo "✅ Deployment completed!"
+            echo "✅ Deployment complete!"
             echo "Backend → http://$EC2_HOST:5000"
             echo "Frontend → http://$EC2_HOST:3000"
           EOF
