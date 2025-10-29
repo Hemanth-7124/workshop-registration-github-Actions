@@ -8,10 +8,14 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+
+
 // Middleware
 const allowedOrigins = [
   'http://localhost',
-  'http://127.0.0.1'
+  'http://127.0.0.1',
+  'http://15.207.147.198:3000',
+
 ];
 
 // Add additional origins from environment variable if provided
