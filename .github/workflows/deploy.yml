@@ -10,28 +10,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      # Step 1: Checkout Code
+      - name: 🧾 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🔐 Setup SSH
+      # Step 2: Configure SSH
+      - name: 🔐 Setup SSH Connection
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      - name: 🚀 Deploy to EC2
+      # Step 3: Deploy to EC2
+      - name: 🚀 Deploy Application
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           GIT_REPO_URL: ${{ secrets.GIT_REPO_URL }}
         run: |
-          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << 'EOF'
+          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << EOF
             set -e
 
             APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
 
             echo "🔍 Checking repository URL..."
+            echo "Using repo URL: $GIT_REPO_URL"
+
             if [ -z "$GIT_REPO_URL" ]; then
               echo "❌ ERROR: Missing GIT_REPO_URL secret in GitHub!"
               exit 1
@@ -39,7 +44,7 @@ jobs:
 
             echo "📦 Checking for project directory..."
             if [ ! -d "$APP_DIR" ]; then
-              echo "🌀 Cloning fresh repository..."
+              echo "🌀 Cloning repository..."
               git clone $GIT_REPO_URL "$APP_DIR"
             fi
 
@@ -64,15 +69,15 @@ jobs:
               --restart unless-stopped \
               workshop-backend:latest
 
-            echo "🏗️ Building frontend (Nuxt)..."
+            echo "🏗️ Installing and building frontend..."
             npm ci
             npm run build
 
-            echo "🌐 Restarting frontend on port 3000..."
+            echo "🌐 Restarting frontend (Nuxt app) on port 3000..."
             pkill -f "node .output/server/index.mjs" >/dev/null 2>&1 || true
             nohup npm run preview -- --port 3000 > frontend.log 2>&1 &
 
-            echo "✅ Deployment completed successfully!"
-            echo "Backend → http://$EC2_HOST:5000"
-            echo "Frontend → http://$EC2_HOST:3000"
+            echo "✅ Deployment successful!"
+            echo "Backend:  http://$EC2_HOST:5000"
+            echo "Frontend: http://$EC2_HOST:3000"
           EOF
