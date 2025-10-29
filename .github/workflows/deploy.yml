@@ -10,12 +10,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout the repository
+      # Step 1: Checkout code
       - name: 📦 Checkout repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup SSH key to connect EC2
-      - name: 🔐 Setup SSH access
+      # Step 2: Setup SSH
+      - name: 🔐 Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
@@ -37,7 +37,6 @@ jobs:
 
             echo "🌀 Starting deployment on EC2..."
 
-            # Clone or update repository
             if [ ! -d "$APP_DIR/.git" ]; then
               echo "📥 Cloning repository..."
               git clone "${GIT_REPO_URL}" "$APP_DIR"
@@ -77,6 +76,6 @@ jobs:
             nohup bash -c "npm run preview -- --port 3000 > frontend.log 2>&1 &" >/dev/null 2>&1 & disown
 
             echo "✅ Deployment completed successfully!"
-            echo "Backend running on:  http://${EC2_HOST}:5000"
-            echo "Frontend running on: http://${EC2_HOST}:3000"
+            echo "Backend → http://${EC2_HOST}:5000"
+            echo "Frontend → http://${EC2_HOST}:3000"
             EOF
