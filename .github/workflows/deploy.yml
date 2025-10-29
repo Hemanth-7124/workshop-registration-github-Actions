@@ -32,7 +32,6 @@ jobs:
           echo "🔧 Starting deployment to EC2..."
           echo "Repo URL: $GIT_REPO_URL"
 
-          # Send environment variables explicitly into remote shell
           ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST \
           "GIT_REPO_URL='$GIT_REPO_URL' EC2_USER='$EC2_USER' EC2_HOST='$EC2_HOST' bash -s" << 'EOF'
             set -e
@@ -79,6 +78,7 @@ jobs:
             echo "🌐 Restarting frontend (Nuxt app) on port 3000..."
             pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
             nohup npm run preview -- --port 3000 > frontend.log 2>&1 &
+            disown
 
             echo "✅ Deployment successful!"
             echo "Backend → http://$EC2_HOST:5000"
