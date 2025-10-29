@@ -1,15 +1,16 @@
-name: 🚀 Fullstack Deploy to EC2
+name: 🚀 Auto Deploy to EC2 (Backend + Frontend)
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup SSH
@@ -19,60 +20,48 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Deploy to EC2
+      - name: 🚀 Deploy to EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
             APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions"
 
-            echo "📂 Updating code..."
+            echo "📦 Checking for project directory..."
             if [ ! -d "$APP_DIR" ]; then
+              echo "🌀 Cloning fresh repository..."
               git clone ${{ secrets.GIT_REPO_URL }} "$APP_DIR"
             fi
+
+            echo "📂 Updating source code..."
             cd "$APP_DIR"
             git fetch origin main
             git reset --hard origin/main
 
-            echo "🧾 Writing environment file..."
-            cat > .env <<EOL
-            NODE_ENV=production
-            PORT=5000
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            SMTP_HOST=${{ secrets.SMTP_HOST }}
-            SMTP_PORT=${{ secrets.SMTP_PORT }}
-            SMTP_USER=${{ secrets.SMTP_USER }}
-            SMTP_PASS=${{ secrets.SMTP_PASS }}
-            FROM_EMAIL=${{ secrets.FROM_EMAIL }}
-            FROM_NAME=${{ secrets.FROM_NAME }}
-            EOL
-
-            echo "🐳 Rebuilding backend container..."
+            echo "🧹 Cleaning old containers and images..."
             sudo docker stop workshop-backend || true
             sudo docker rm workshop-backend || true
-            sudo docker build -t workshop-backend -f Dockerfile .
+            sudo docker rmi workshop-backend:latest || true
+
+            echo "🐳 Building new Docker image..."
+            sudo docker build -t workshop-backend:latest .
+
+            echo "🚀 Running new backend container..."
             sudo docker run -d \
               --name workshop-backend \
-              --env-file .env \
               -p 5000:5000 \
+              --env-file .env \
               --restart unless-stopped \
-              workshop-backend
+              workshop-backend:latest
 
-            echo "🧰 Installing frontend dependencies..."
+            echo "🏗️ Building frontend (Nuxt)..."
             npm ci
-
-            echo "🏗️ Building Nuxt frontend..."
             npm run build
 
-            echo "🌐 Restarting frontend (Nuxt) on port 3000..."
-            # Kill old Nuxt process if exists
+            echo "🌐 Restarting frontend on port 3000..."
             pkill -f "node .output/server/index.mjs" || true
-
             nohup npm run preview -- --port 3000 > frontend.log 2>&1 &
 
-            echo "✅ Deployment successful!"
-            echo "Frontend running on: http://15.207.147.198:3000"
-            echo "Backend running on: http://15.207.147.198:5000"
+            echo "✅ Deployment completed successfully!"
+            echo "Backend → http://${{ secrets.EC2_HOST }}:5000"
+            echo "Frontend → http://${{ secrets.EC2_HOST }}:3000"
           EOF
