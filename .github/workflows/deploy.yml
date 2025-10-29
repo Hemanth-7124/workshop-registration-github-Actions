@@ -1,4 +1,4 @@
-name: 🚀 Auto Deploy to EC2 (Backend + Frontend)
+name: 🚀 Fullstack Deploy to EC2
 
 on:
   push:
@@ -10,39 +10,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout Code
-      - name: 🧾 Checkout Repository
+      # Step 1: Checkout the repository
+      - name: 📦 Checkout repository
         uses: actions/checkout@v4
 
-      # Setup SSH
-      - name: 🔐 Setup SSH
+      # Step 2: Setup SSH key to connect EC2
+      - name: 🔐 Setup SSH access
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # Deploy to EC2
-      - name: 🚀 Deploy to EC2
+      # Step 3: Deploy to EC2
+      - name: 🚀 Deploy on EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           GIT_REPO_URL: ${{ secrets.GIT_REPO_URL }}
         run: |
-          echo "🔧 Starting deployment on EC2..."
-
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "bash -s" <<'EOF'
             set -e
 
             APP_DIR="/home/$USER/workshop-registration-github-Actions"
             BRANCH="main"
 
-            echo "📦 Checking repository..."
+            echo "🌀 Starting deployment on EC2..."
+
+            # Clone or update repository
             if [ ! -d "$APP_DIR/.git" ]; then
-              echo "🌀 Cloning repository from ${GIT_REPO_URL} ..."
+              echo "📥 Cloning repository..."
               git clone "${GIT_REPO_URL}" "$APP_DIR"
             else
-              echo "🔄 Pulling latest code from branch: $BRANCH ..."
+              echo "🔄 Pulling latest code..."
               cd "$APP_DIR"
               git fetch origin $BRANCH
               git reset --hard origin/$BRANCH
@@ -50,12 +50,12 @@ jobs:
 
             cd "$APP_DIR"
 
-            echo "🧹 Cleaning old backend container..."
+            echo "🧹 Cleaning old backend containers..."
             sudo docker stop workshop-backend >/dev/null 2>&1 || true
             sudo docker rm workshop-backend >/dev/null 2>&1 || true
             sudo docker rmi workshop-backend:latest >/dev/null 2>&1 || true
 
-            echo "🐳 Building new backend Docker image..."
+            echo "🐳 Building backend Docker image..."
             sudo docker build -t workshop-backend:latest .
 
             echo "🚀 Running backend container..."
@@ -66,19 +66,17 @@ jobs:
               --restart unless-stopped \
               workshop-backend:latest
 
-            echo "📦 Installing frontend dependencies..."
+            echo "🧰 Installing frontend dependencies..."
             npm ci --prefer-offline --no-audit --progress=false
 
             echo "⚙️ Building frontend..."
             npm run build
 
-            echo "🌐 Restarting Nuxt frontend on port 3000..."
+            echo "🌐 Starting Nuxt frontend on port 3000..."
             pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
-            sleep 2
-            LOG_FILE="/home/$USER/frontend.log"
-            nohup bash -c "npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" >/dev/null 2>&1 & disown
+            nohup bash -c "npm run preview -- --port 3000 > frontend.log 2>&1 &" >/dev/null 2>&1 & disown
 
             echo "✅ Deployment completed successfully!"
-            echo "Backend:  http://15.207.147.198:5000"
-            echo "Frontend: http://15.207.147.198:3000"
-            EOF
+            echo "Backend running on:  http://${EC2_HOST}:5000"
+            echo "Frontend running on: http://${EC2_HOST}:3000"
+EOF
