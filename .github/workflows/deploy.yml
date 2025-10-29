@@ -1,20 +1,17 @@
-name: 🚀 Deploy Workshop App
+name: 🚀 Fullstack Deploy to EC2
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout Code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup SSH
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -22,30 +19,28 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
-      # 3️⃣ Deploy to EC2
-      - name: 🚀 Deploy to EC2
+      - name: Deploy to EC2
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
             set -e
             APP_DIR="/home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions"
-            cd "$APP_DIR"
 
-            echo "📦 Pulling latest code..."
+            echo "📂 Updating code..."
+            if [ ! -d "$APP_DIR" ]; then
+              git clone ${{ secrets.GIT_REPO_URL }} "$APP_DIR"
+            fi
+            cd "$APP_DIR"
             git fetch origin main
             git reset --hard origin/main
 
-            echo "🧾 Writing clean .env file..."
+            echo "🧾 Writing environment file..."
             cat > .env <<EOL
             NODE_ENV=production
             PORT=5000
-
-            # Database
             DB_HOST=${{ secrets.DB_HOST }}
             DB_USER=${{ secrets.DB_USER }}
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             DB_NAME=${{ secrets.DB_NAME }}
-
-            # Email
             SMTP_HOST=${{ secrets.SMTP_HOST }}
             SMTP_PORT=${{ secrets.SMTP_PORT }}
             SMTP_USER=${{ secrets.SMTP_USER }}
@@ -54,65 +49,30 @@ jobs:
             FROM_NAME=${{ secrets.FROM_NAME }}
             EOL
 
-            echo "🏗️ Building frontend..."
-            npm ci
-            npm run build
-
-            echo "🐳 Building backend Docker image..."
+            echo "🐳 Rebuilding backend container..."
             sudo docker stop workshop-backend || true
             sudo docker rm workshop-backend || true
-            sudo docker rmi workshop-backend:latest || true
-            sudo docker build -t workshop-backend:latest .
-
-            echo "🚀 Running backend container..."
+            sudo docker build -t workshop-backend -f Dockerfile .
             sudo docker run -d \
               --name workshop-backend \
-              -p 5000:5000 \
               --env-file .env \
+              -p 5000:5000 \
               --restart unless-stopped \
-              workshop-backend:latest
+              workshop-backend
 
-            echo "🌐 Installing and configuring NGINX..."
-            sudo apt-get update -qq && sudo apt-get install -y nginx
+            echo "🧰 Installing frontend dependencies..."
+            npm ci
 
-            sudo tee /etc/nginx/sites-available/workshop.conf > /dev/null << 'NGINX_CONF'
-            server {
-              listen 80;
-              server_name _;
+            echo "🏗️ Building Nuxt frontend..."
+            npm run build
 
-              # Frontend (Nuxt/Vue build)
-              location / {
-                root /home/${{ secrets.EC2_USER }}/workshop-registration-github-Actions/.output/public;
-                index index.html;
-                try_files $uri $uri/ /index.html;
-              }
+            echo "🌐 Restarting frontend (Nuxt) on port 3000..."
+            # Kill old Nuxt process if exists
+            pkill -f "node .output/server/index.mjs" || true
 
-              # Backend API
-              location /api/ {
-                proxy_pass http://localhost:5000;
-                proxy_http_version 1.1;
-                proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection 'upgrade';
-                proxy_set_header Host $host;
-                proxy_cache_bypass $http_upgrade;
-              }
+            nohup npm run preview -- --port 3000 > frontend.log 2>&1 &
 
-              # Health check
-              location /health {
-                proxy_pass http://localhost:5000/health;
-              }
-            }
-            NGINX_CONF
-
-            sudo ln -sf /etc/nginx/sites-available/workshop.conf /etc/nginx/sites-enabled/
-            sudo rm -f /etc/nginx/sites-enabled/default
-            sudo nginx -t && sudo systemctl restart nginx
-
-            echo "✅ Deployment complete!"
-            echo "🌍 Frontend → http://${{ secrets.EC2_HOST }}"
-            echo "🔧 Backend → http://${{ secrets.EC2_HOST }}/api"
-            echo "🏥 Health → http://${{ secrets.EC2_HOST }}/health"
-
-            echo "📊 Active Docker containers:"
-            sudo docker ps
+            echo "✅ Deployment successful!"
+            echo "Frontend running on: http://15.207.147.198:3000"
+            echo "Backend running on: http://15.207.147.198:5000"
           EOF
