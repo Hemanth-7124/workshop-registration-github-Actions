@@ -10,11 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
+      # Step 1: Checkout code
       - name: 🧾 Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup SSH connection
+      # Step 2: Setup SSH
       - name: 🔐 Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -29,74 +29,67 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
           GIT_REPO_URL: ${{ secrets.GIT_REPO_URL }}
         run: |
-          echo "🔧 Starting deployment to EC2..."
-          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << EOF
-          set -e
+          echo "🔧 Starting deployment on EC2..."
+          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << 'EOF' || true
+            set -e
 
-          # Export variables safely
-          export GIT_REPO_URL="${GIT_REPO_URL}"
-          export EC2_USER="${EC2_USER}"
-          export EC2_HOST="${EC2_HOST}"
+            APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
 
-          APP_DIR="/home/${EC2_USER}/workshop-registration-github-Actions"
+            echo "📁 Checking repository..."
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "🌀 Cloning repository..."
+              git clone "$GIT_REPO_URL" "$APP_DIR"
+            else
+              echo "🔄 Updating existing code..."
+              cd "$APP_DIR"
+              git fetch origin main
+              git reset --hard origin/main
+            fi
 
-          echo "📦 Checking project directory..."
-          if [ ! -d "\$APP_DIR/.git" ]; then
-            echo "🌀 Cloning repository (first time)..."
-            rm -rf "\$APP_DIR"
-            git clone "\$GIT_REPO_URL" "\$APP_DIR"
-          else
-            echo "📂 Updating existing repository..."
-            cd "\$APP_DIR"
-            git fetch origin main
-            git reset --hard origin/main
-          fi
+            cd "$APP_DIR"
 
-          cd "\$APP_DIR"
+            echo "🧹 Cleaning old backend container..."
+            sudo docker stop workshop-backend >/dev/null 2>&1 || true
+            sudo docker rm workshop-backend >/dev/null 2>&1 || true
+            sudo docker rmi workshop-backend:latest >/dev/null 2>&1 || true
 
-          echo "🧹 Cleaning old backend containers and images..."
-          sudo docker stop workshop-backend >/dev/null 2>&1 || true
-          sudo docker rm workshop-backend >/dev/null 2>&1 || true
-          sudo docker rmi workshop-backend:latest >/dev/null 2>&1 || true
+            echo "🐳 Building backend Docker image..."
+            sudo docker build -t workshop-backend:latest .
 
-          echo "🐳 Building new backend Docker image..."
-          sudo docker build -t workshop-backend:latest .
+            echo "🚀 Running backend container..."
+            sudo docker run -d \
+              --name workshop-backend \
+              -p 5000:5000 \
+              --env-file .env \
+              --restart unless-stopped \
+              workshop-backend:latest
 
-          echo "🚀 Running new backend container..."
-          sudo docker run -d \
-            --name workshop-backend \
-            -p 5000:5000 \
-            --env-file .env \
-            --restart unless-stopped \
-            workshop-backend:latest
+            echo "📦 Installing frontend dependencies..."
+            if [ -d node_modules ]; then
+              echo "✅ Using cached node_modules"
+            else
+              npm install --prefer-offline --no-audit --progress=false
+            fi
 
-          echo "🏗️ Installing frontend dependencies..."
-          if [ -d node_modules ]; then
-            echo "✅ Using cached node_modules"
-          else
-            npm install --prefer-offline --no-audit --progress=false
-          fi
+            echo "⚙️ Building frontend..."
+            npm run build
 
-          echo "⚙️ Building frontend..."
-          npm run build
+            echo "🌐 Restarting Nuxt frontend on port 3000..."
+            pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
+            sleep 2
 
-          echo "🌐 Restarting frontend (Nuxt app) on port 3000..."
-          pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
-          sleep 2
+            LOG_FILE="/home/$EC2_USER/frontend.log"
+            nohup bash -c "setsid npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" &
 
-          LOG_FILE="/home/${EC2_USER}/frontend.log"
-          echo "Starting Nuxt frontend..."
-          nohup bash -c "setsid npm run preview -- --port 3000 > \$LOG_FILE 2>&1 &" &
+            sleep 3
+            if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
+              echo "✅ Frontend running successfully!"
+            else
+              echo "❌ Frontend failed to start. Check logs at $LOG_FILE"
+            fi
 
-          sleep 3
-          if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
-            echo "✅ Frontend running successfully!"
-          else
-            echo "❌ Frontend failed to start. Check logs at \$LOG_FILE"
-          fi
-
-          echo "✅ Deployment complete!"
-          echo "Backend → http://${EC2_HOST}:5000"
-          echo "Frontend → http://${EC2_HOST}:3000"
-          exit
+            echo "✅ Deployment complete!"
+            echo "Backend → http://$EC2_HOST:5000"
+            echo "Frontend → http://$EC2_HOST:3000"
+            exit
           EOF
