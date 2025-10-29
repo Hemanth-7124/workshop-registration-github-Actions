@@ -31,25 +31,27 @@ jobs:
         run: |
           echo "🔧 Starting deployment on EC2..."
 
-          # ✅ Properly pass environment variables to EC2
-          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST \
-          "export GIT_REPO_URL='${GIT_REPO_URL}'; export EC2_USER='${EC2_USER}'; export EC2_HOST='${EC2_HOST}'; bash -s" << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST "bash -s" <<EOF
             set -e
+
+            export GIT_REPO_URL="${GIT_REPO_URL}"
+            export EC2_USER="${EC2_USER}"
+            export EC2_HOST="${EC2_HOST}"
 
             APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
 
             echo "📦 Checking repository..."
-            if [ ! -d "$APP_DIR/.git" ]; then
-              echo "🌀 Cloning repository from $GIT_REPO_URL ..."
-              git clone "$GIT_REPO_URL" "$APP_DIR"
+            if [ ! -d "\$APP_DIR/.git" ]; then
+              echo "🌀 Cloning repository from \$GIT_REPO_URL ..."
+              git clone "\$GIT_REPO_URL" "\$APP_DIR"
             else
-              echo "🔄 Pulling latest code..."
-              cd "$APP_DIR"
+              echo "🔄 Pulling latest code (main branch)..."
+              cd "\$APP_DIR"
               git fetch origin main
               git reset --hard origin/main
             fi
 
-            cd "$APP_DIR"
+            cd "\$APP_DIR"
 
             echo "🧹 Cleaning old backend containers/images..."
             sudo docker stop workshop-backend >/dev/null 2>&1 || true
@@ -81,20 +83,21 @@ jobs:
             pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
             sleep 2
 
-            LOG_FILE="/home/$EC2_USER/frontend.log"
-            nohup bash -c "npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" &
+            LOG_FILE="/home/\$EC2_USER/frontend.log"
+            nohup bash -c "npm run preview -- --port 3000 > \$LOG_FILE 2>&1 &" >/dev/null 2>&1 & disown
 
             sleep 5
             if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
               echo "✅ Frontend running successfully!"
             else
-              echo "❌ Frontend failed to start. Check logs at $LOG_FILE"
+              echo "❌ Frontend failed to start. Check logs at \$LOG_FILE"
             fi
 
             echo "✅ Deployment completed successfully!"
-            echo "Backend → http://$EC2_HOST:5000"
-            echo "Frontend → http://$EC2_HOST:3000"
-            exit 0
-          EOF
+            echo "Backend → http://\$EC2_HOST:5000"
+            echo "Frontend → http://\$EC2_HOST:3000"
 
-          echo "🎉 Deployment script completed without SSH exit error!"
+            exit 0
+            EOF
+
+          echo "🎉 Deployment script completed successfully — no SSH disconnects!"
