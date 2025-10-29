@@ -33,22 +33,26 @@ jobs:
           ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << EOF
           set -e
 
+          # Export variables safely
           export GIT_REPO_URL="${GIT_REPO_URL}"
           export EC2_USER="${EC2_USER}"
           export EC2_HOST="${EC2_HOST}"
 
           APP_DIR="/home/${EC2_USER}/workshop-registration-github-Actions"
 
-          echo "📦 Checking for project directory..."
-          if [ ! -d "$APP_DIR" ]; then
-            echo "🌀 Cloning repository..."
+          echo "📦 Checking project directory..."
+          if [ ! -d "\$APP_DIR/.git" ]; then
+            echo "🌀 Cloning repository (first time)..."
+            rm -rf "\$APP_DIR"
             git clone "\$GIT_REPO_URL" "\$APP_DIR"
+          else
+            echo "📂 Updating existing repository..."
+            cd "\$APP_DIR"
+            git fetch origin main
+            git reset --hard origin/main
           fi
 
-          echo "📂 Updating source code..."
           cd "\$APP_DIR"
-          git fetch origin main
-          git reset --hard origin/main
 
           echo "🧹 Cleaning old backend containers and images..."
           sudo docker stop workshop-backend >/dev/null 2>&1 || true
@@ -59,7 +63,6 @@ jobs:
           sudo docker build -t workshop-backend:latest .
 
           echo "🚀 Running new backend container..."
-          # Proper quoting — no command substitution or broken env vars
           sudo docker run -d \
             --name workshop-backend \
             -p 5000:5000 \
