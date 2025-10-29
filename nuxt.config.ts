@@ -12,7 +12,7 @@ export default defineNuxtConfig({
       appName: 'Workshop Registration System',
 
       // ✅ Always point to backend port 5000
-      apiBase: 'http://localhost:5000/api'
+      apiBase: process.env.API_BASE_URL|| 'http://localhost:5000/api'
     }
   },
 
