@@ -10,11 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout Code
+      # Step 1: Checkout repository
       - name: 🧾 Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup SSH Connection
+      # Step 2: Setup SSH connection
       - name: 🔐 Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -30,19 +30,11 @@ jobs:
           GIT_REPO_URL: ${{ secrets.GIT_REPO_URL }}
         run: |
           echo "🔧 Starting deployment to EC2..."
-          echo "Repo URL: $GIT_REPO_URL"
-
-          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST \
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST \
           "GIT_REPO_URL='$GIT_REPO_URL' EC2_USER='$EC2_USER' EC2_HOST='$EC2_HOST' bash -s" << 'EOF'
             set -e
 
             APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
-
-            echo "🔍 Using repository URL: $GIT_REPO_URL"
-            if [ -z "$GIT_REPO_URL" ]; then
-              echo "❌ ERROR: GIT_REPO_URL is missing!"
-              exit 1
-            fi
 
             echo "📦 Checking for project directory..."
             if [ ! -d "$APP_DIR" ]; then
@@ -71,16 +63,34 @@ jobs:
               --restart unless-stopped \
               workshop-backend:latest
 
-            echo "🏗️ Installing and building frontend..."
-            npm ci
+            echo "🏗️ Installing frontend dependencies..."
+            if [ -d node_modules ]; then
+              echo "✅ Using cached node_modules"
+            else
+              npm install --prefer-offline --no-audit --progress=false
+            fi
+
+            echo "⚙️ Building frontend..."
             npm run build
 
-            echo "🌐 Restarting frontend (Nuxt app) on port 3000..."
+            echo "🌐 Restarting Nuxt frontend..."
+            # Kill any existing process
             pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
-            nohup npm run preview -- --port 3000 > frontend.log 2>&1 &
-            disown
+            sleep 2
 
-            echo "✅ Deployment successful!"
+            # Start detached process safely using nohup + setsid
+            LOG_FILE="/home/$EC2_USER/frontend.log"
+            echo "Starting Nuxt on port 3000..."
+            nohup bash -c "setsid npm run preview -- --port 3000 > $LOG_FILE 2>&1 &" &
+
+            sleep 3
+            if pgrep -f 'node .output/server/index.mjs' >/dev/null; then
+              echo "✅ Nuxt frontend running successfully!"
+            else
+              echo "❌ Failed to start Nuxt frontend. Check $LOG_FILE"
+            fi
+
+            echo "✅ Deployment completed!"
             echo "Backend → http://$EC2_HOST:5000"
             echo "Frontend → http://$EC2_HOST:3000"
           EOF
