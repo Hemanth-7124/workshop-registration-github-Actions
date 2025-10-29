@@ -14,8 +14,8 @@ jobs:
       - name: 🧾 Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Configure SSH
-      - name: 🔐 Setup SSH Connection
+      # Step 2: Setup SSH Connection
+      - name: 🔐 Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
@@ -23,29 +23,32 @@ jobs:
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
 
       # Step 3: Deploy to EC2
-      - name: 🚀 Deploy Application
+      - name: 🚀 Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           GIT_REPO_URL: ${{ secrets.GIT_REPO_URL }}
         run: |
-          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST << EOF
+          echo "🔧 Starting deployment to EC2..."
+          echo "Repo URL: $GIT_REPO_URL"
+
+          # Send environment variables explicitly into remote shell
+          ssh -tt -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $EC2_USER@$EC2_HOST \
+          "GIT_REPO_URL='$GIT_REPO_URL' EC2_USER='$EC2_USER' EC2_HOST='$EC2_HOST' bash -s" << 'EOF'
             set -e
 
             APP_DIR="/home/$EC2_USER/workshop-registration-github-Actions"
 
-            echo "🔍 Checking repository URL..."
-            echo "Using repo URL: $GIT_REPO_URL"
-
+            echo "🔍 Using repository URL: $GIT_REPO_URL"
             if [ -z "$GIT_REPO_URL" ]; then
-              echo "❌ ERROR: Missing GIT_REPO_URL secret in GitHub!"
+              echo "❌ ERROR: GIT_REPO_URL is missing!"
               exit 1
             fi
 
             echo "📦 Checking for project directory..."
             if [ ! -d "$APP_DIR" ]; then
               echo "🌀 Cloning repository..."
-              git clone $GIT_REPO_URL "$APP_DIR"
+              git clone "$GIT_REPO_URL" "$APP_DIR"
             fi
 
             echo "📂 Updating source code..."
@@ -74,10 +77,10 @@ jobs:
             npm run build
 
             echo "🌐 Restarting frontend (Nuxt app) on port 3000..."
-            pkill -f "node .output/server/index.mjs" >/dev/null 2>&1 || true
+            pkill -f 'node .output/server/index.mjs' >/dev/null 2>&1 || true
             nohup npm run preview -- --port 3000 > frontend.log 2>&1 &
 
             echo "✅ Deployment successful!"
-            echo "Backend:  http://$EC2_HOST:5000"
-            echo "Frontend: http://$EC2_HOST:3000"
+            echo "Backend → http://$EC2_HOST:5000"
+            echo "Frontend → http://$EC2_HOST:3000"
           EOF
